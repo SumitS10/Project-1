@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: options-dashboard
+    env: python
+    buildCommand: |
+      npm install
+      npm run build
+      cd backend
+      pip install -r requirements.txt
+      python manage.py migrate
+      python manage.py collectstatic --noinput
+    startCommand: cd backend && gunicorn backend.wsgi:application
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: backend.settings
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"

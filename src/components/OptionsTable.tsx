@@ -70,6 +70,7 @@ export const OptionsTable: React.FC<Props> = ({ positions, onChange }) => {
               <td>
                 <input
                   value={p.symbol}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => updateField(p.id, "symbol", e.target.value)}
                 />
               </td>

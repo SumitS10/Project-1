@@ -1,33 +1,46 @@
 ## Options Tracking & Risk Dashboard
 
-This is a small web dashboard for tracking options positions and viewing simple portfolio risk metrics. It is built with React and Vite and can be deployed as a static web app.
+A web dashboard for tracking options positions and viewing portfolio risk metrics. Built with React + Django backend.
 
-### Running locally
+### Quick Start (Frontend Only)
 
 1. Install dependencies:
-
 ```bash
-cd /Users/sumitsapkota/Desktop/project-1
 npm install
 ```
 
-2. Start the dev server:
-
+2. Start dev server:
 ```bash
 npm run dev
 ```
 
-Then open the printed local URL in your browser.
+### Full Stack (Frontend + Backend)
 
-### Building for the web (deployment)
+**Option 1: Combined Deployment (Recommended)**
+- Deploy everything together on one server
+- See `DEPLOYMENT.md` for details
 
-To create a static production build:
-
+**Quick test:**
 ```bash
+# 1. Build React
 npm run build
-```
 
-This outputs static files into the `dist` directory. You can deploy the contents of `dist` to any static host (for example Netlify, GitHub Pages, or Vercel).
+# 2. Set up Django
+cd backend
+source ../venv/bin/activate
+pip install -r requirements.txt
+python manage.py makemigrations
+python manage.py migrate
+
+# 3. Run server
+python manage.py runserver
+```
+Visit `http://localhost:8000` - both frontend and API work!
+
+**Option 2: Separate Deployment**
+- Frontend → Netlify/Vercel (static hosting)
+- Backend → Railway/Render (Django API)
+- See `DEPLOYMENT.md` for details
 
 ### Features
 

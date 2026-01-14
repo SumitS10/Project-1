@@ -1,17 +1,20 @@
 import React from "react";
+import { CSVUpload } from "./CSVUpload";
 
 interface Props {
   riskFreeRate: number;
   onRiskFreeRateChange: (v: number) => void;
   positionCount: number;
   totals: { notional: number; premium: number };
+  onRefresh: () => void;
 }
 
 export const Toolbar: React.FC<Props> = ({
   riskFreeRate,
   onRiskFreeRateChange,
   positionCount,
-  totals
+  totals,
+  onRefresh
 }) => {
   return (
     <div className="toolbar">
@@ -29,6 +32,11 @@ export const Toolbar: React.FC<Props> = ({
           </div>
         </label>
       </div>
+      
+      <div className="toolbar-group">
+        <CSVUpload onUploadSuccess={onRefresh} />
+      </div>
+
       <div className="toolbar-group toolbar-metrics">
         <div className="toolbar-chip">
           <span className="chip-label">Positions</span>

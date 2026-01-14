@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { OptionsTable } from "./components/OptionsTable";
 import { RiskSummary } from "./components/RiskSummary";
 import { Toolbar } from "./components/Toolbar";
 import type { OptionPosition } from "./types";
+import { fetchAllPositions } from "./api";
 
 const sampleData: OptionPosition[] = [
   {
@@ -43,6 +44,32 @@ const sampleData: OptionPosition[] = [
 export const App: React.FC = () => {
   const [positions, setPositions] = useState<OptionPosition[]>(sampleData);
   const [riskFreeRate, setRiskFreeRate] = useState(0.03);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load positions from backend on mount
+  useEffect(() => {
+    loadPositions();
+  }, []);
+
+  const loadPositions = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const backendPositions = await fetchAllPositions();
+      if (backendPositions.length > 0) {
+        // Use backend data if available
+        setPositions(backendPositions);
+      }
+      // Otherwise keep sample data
+    } catch (err) {
+      console.warn('Could not load from backend, using sample data:', err);
+      setError('Backend not available - using sample data');
+      // Keep sample data as fallback
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const totals = useMemo(() => {
     const notional = positions.reduce(
@@ -73,7 +100,20 @@ export const App: React.FC = () => {
         onRiskFreeRateChange={setRiskFreeRate}
         positionCount={positions.length}
         totals={totals}
+        onRefresh={loadPositions}
       />
+
+      {loading && (
+        <div className="status-message">
+          Loading positions from backend...
+        </div>
+      )}
+
+      {error && (
+        <div className="status-message warning">
+          {error}
+        </div>
+      )}
 
       <main className="app-main">
         <section className="panel">

@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "dist"
-  }
+  },
+  // Use relative paths for API calls (works with combined deployment)
+  base: "./"
 });
 
 
