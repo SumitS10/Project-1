@@ -1,49 +1,286 @@
 import pandas as pd
 import numpy as np
-from .models import FidelityTrade, TradierTrade
+from datetime import date, datetime
+from typing import Dict, List, Any, Optional
+from .models import FidelityTrade, TradierTrade, WebullTrade, TradeLog
 
-def get_market_price(symbol: str) -> float:
-    """Get current market price for a symbol. Replace with real API."""
-    # TODO: Replace with real market data API (Alpha Vantage, Yahoo Finance, etc.)
-    return 100.0 + float(np.random.rand() * 20.0)
+def parse_date(val) -> Optional[date]:
+    """Parse date from various formats."""
+    if val is None or val == "" or pd.isna(val):
+        return None
+    if isinstance(val, date):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    try:
+        return pd.to_datetime(val).date()
+    except:
+        return None
+
+def get_trade_id(row: Dict, col_map: Dict[str, int]) -> str:
+    """Get Trade ID from row, with fallback."""
+    # Column 1: Trade ID
+    tid = row.get('trade_id') or row.get('tradeid') or row.get('trade_id')
+    if tid and str(tid).strip():
+        return str(tid).strip()
+    
+    # Fallback: TradeDate|Symbol|Strategy
+    trade_date = row.get('trade_date') or row.get('tradedate') or row.get('trade_date')
+    symbol = row.get('symbol') or row.get('symbol')
+    strategy = row.get('strategy') or row.get('strategy') or ""
+    
+    return f"{trade_date}|{symbol}|{strategy}"
+
+def process_sheet_rows(rows: List[Dict], source: str) -> Dict[str, Dict]:
+    """
+    Process rows from a sheet and aggregate by Trade ID.
+    Equivalent to ProcessSheet VBA function.
+    """
+    dict_trades = {}
+    
+    for row in rows:
+        # Get Trade ID
+        tid = get_trade_id(row, {})
+        
+        # Initialize trade if not exists
+        if tid not in dict_trades:
+            dict_trades[tid] = {
+                "Source": source,
+                "TradeDate": parse_date(row.get('trade_date') or row.get('tradedate')),
+                "Symbol": str(row.get('symbol') or row.get('symbol') or "").strip(),
+                "Strategy": str(row.get('strategy') or row.get('strategy') or "").strip(),
+                "Expiration": parse_date(row.get('expiry') or row.get('expiration') or row.get('expiry')),
+                "Strikes": "",
+                "Status": "Open",
+                "CloseDate": None,
+                "Legs": 0,
+                "ClosedLegs": 0,
+                "OpenNet": 0.0,
+                "CloseNet": 0.0,
+                "Qty": float(row.get('quantity') or row.get('qty') or 0),
+            }
+        
+        d = dict_trades[tid]
+        d["Legs"] += 1
+        
+        # Get values
+        prem = float(row.get('premium') or row.get('premium') or 0)
+        qty = float(row.get('quantity') or row.get('qty') or 0)
+        act = str(row.get('action') or row.get('action') or "").upper().strip()
+        
+        # Process actions
+        if act == "BTO":
+            d["OpenNet"] = d["OpenNet"] - prem * qty
+        elif act == "STO":
+            d["OpenNet"] = d["OpenNet"] + prem * qty
+        elif act == "STC":
+            d["CloseNet"] = d["CloseNet"] + prem * qty
+            d["ClosedLegs"] += 1
+            if not d["CloseDate"]:
+                d["CloseDate"] = parse_date(row.get('trade_date') or row.get('tradedate'))
+        elif act == "BTC":
+            d["CloseNet"] = d["CloseNet"] - prem * qty
+            d["ClosedLegs"] += 1
+            if not d["CloseDate"]:
+                d["CloseDate"] = parse_date(row.get('trade_date') or row.get('tradedate'))
+        
+        # Strikes
+        strike = str(row.get('strike') or row.get('strike') or "")
+        if d["Strikes"]:
+            d["Strikes"] += "/"
+        d["Strikes"] += strike
+        
+        # Check if closed
+        if d["ClosedLegs"] >= d["Legs"]:
+            d["Status"] = "Closed"
+            d["PL"] = (d["CloseNet"] - d["OpenNet"]) * 100
+            if d["OpenNet"] != 0:
+                d["PLPercent"] = d["PL"] / abs(d["OpenNet"] * 100)
+            else:
+                d["PLPercent"] = 0
+            
+            if d["PL"] > 0:
+                d["WinLoss"] = "Win"
+            elif d["PL"] < 0:
+                d["WinLoss"] = "Loss"
+            else:
+                d["WinLoss"] = "BreakEven"
+        else:
+            d["PL"] = 0
+            d["PLPercent"] = 0
+            d["WinLoss"] = ""
+        
+        d["NetPremium"] = d["OpenNet"]
+        d["TotalCost"] = abs(d["OpenNet"]) * 100
+        
+        # DTE calculation
+        today = date.today()
+        if d["Status"] == "Open":
+            if d["Expiration"]:
+                d["DTE"] = (d["Expiration"] - today).days
+            else:
+                d["DTE"] = None
+        else:
+            if d["CloseDate"] and d["TradeDate"]:
+                d["DTE"] = (d["CloseDate"] - d["TradeDate"]).days
+            else:
+                d["DTE"] = None
+    
+    return dict_trades
+
+def update_trade_log():
+    """
+    Equivalent to UpdateTradeLog VBA function.
+    Processes all import sheets and creates/updates TradeLog entries.
+    """
+    # Clear existing trade log
+    TradeLog.objects.all().delete()
+    
+    # Process each source
+    all_trades = {}
+    
+    # Process Fidelity
+    fidelity_rows = []
+    for trade in FidelityTrade.objects.all():
+        fidelity_rows.append({
+            'trade_id': trade.trade_id,
+            'trade_date': trade.trade_date,
+            'symbol': trade.symbol,
+            'strategy': trade.strategy,
+            'strike': trade.strike,
+            'action': trade.action,
+            'quantity': trade.quantity,
+            'premium': trade.premium,
+            'expiry': trade.expiry,
+        })
+    
+    if fidelity_rows:
+        fidelity_trades = process_sheet_rows(fidelity_rows, "Fidelity")
+        all_trades.update(fidelity_trades)
+    
+    # Process Tradier
+    tradier_rows = []
+    for trade in TradierTrade.objects.all():
+        tradier_rows.append({
+            'trade_id': trade.trade_id,
+            'trade_date': trade.trade_date,
+            'symbol': trade.symbol,
+            'strategy': trade.strategy,
+            'strike': trade.strike,
+            'action': trade.action,
+            'quantity': trade.quantity,
+            'premium': trade.premium,
+            'expiry': trade.expiry,
+        })
+    
+    if tradier_rows:
+        tradier_trades = process_sheet_rows(tradier_rows, "Tradier")
+        all_trades.update(tradier_trades)
+    
+    # Process Webull
+    webull_rows = []
+    for trade in WebullTrade.objects.all():
+        webull_rows.append({
+            'trade_id': trade.trade_id,
+            'trade_date': trade.trade_date,
+            'symbol': trade.symbol,
+            'strategy': trade.strategy,
+            'strike': trade.strike,
+            'action': trade.action,
+            'quantity': trade.quantity,
+            'premium': trade.premium,
+            'expiry': trade.expiry,
+        })
+    
+    if webull_rows:
+        webull_trades = process_sheet_rows(webull_rows, "Webull")
+        all_trades.update(webull_trades)
+    
+    # Create TradeLog entries
+    for tid, d in all_trades.items():
+        TradeLog.objects.create(
+            trade_id=tid,
+            source=d["Source"],
+            trade_date=d["TradeDate"] or date.today(),
+            close_date=d["CloseDate"],
+            symbol=d["Symbol"],
+            strategy=d["Strategy"],
+            expiration=d["Expiration"],
+            strikes=d["Strikes"],
+            net_premium=d["NetPremium"],
+            total_cost=d["TotalCost"],
+            pl=d.get("PL", 0),
+            pl_percent=d.get("PLPercent", 0),
+            status=d["Status"],
+            win_loss=d.get("WinLoss", ""),
+            dte=d.get("DTE"),
+            legs=d["Legs"],
+            closed_legs=d["ClosedLegs"],
+            open_net=d["OpenNet"],
+            close_net=d["CloseNet"],
+        )
 
 def import_fidelity(file_path: str) -> None:
     """Import Fidelity CSV and save to database."""
     df = pd.read_csv(file_path)
     df.columns = [c.strip().lower() for c in df.columns]
-
+    
+    # Map columns (adjust based on your actual CSV structure)
+    # Assuming columns: trade_id, trade_date, symbol, strategy, strike, action, quantity, premium, expiry
     for _, row in df.iterrows():
-        trade = FidelityTrade.objects.create(
-            symbol=row['symbol'],
-            trade_date=pd.to_datetime(row['trade_date']).date(),
-            option_type=row['option_type'].upper(),
-            strike=float(row['strike']),
-            expiry=pd.to_datetime(row['expiry']).date(),
-            quantity=int(row['quantity']),
-            premium=float(row['premium']),
+        FidelityTrade.objects.create(
+            trade_id=str(row.get('trade_id', '') or row.get('tradeid', '') or ''),
+            trade_date=parse_date(row.get('trade_date') or row.get('tradedate')) or date.today(),
+            symbol=str(row.get('symbol', '') or row.get('symbol', '')).strip(),
+            strategy=str(row.get('strategy', '') or row.get('strategy', '')).strip(),
+            strike=float(row.get('strike', 0) or row.get('strike', 0)) if pd.notna(row.get('strike', 0)) else None,
+            action=str(row.get('action', '') or row.get('action', '')).strip().upper(),
+            quantity=float(row.get('quantity', 0) or row.get('qty', 0)),
+            premium=float(row.get('premium', 0) or row.get('premium', 0)),
+            expiry=parse_date(row.get('expiry') or row.get('expiration') or row.get('expiry')),
         )
-        set_trade_pnl(trade)
+    
+    # Update trade log after import
+    update_trade_log()
 
 def import_tradier(file_path: str) -> None:
     """Import Tradier CSV and save to database."""
     df = pd.read_csv(file_path)
     df.columns = [c.strip().lower() for c in df.columns]
-
+    
     for _, row in df.iterrows():
-        trade = TradierTrade.objects.create(
-            symbol=row['symbol'],
-            trade_date=pd.to_datetime(row['trade_date']).date(),
-            option_type=row['option_type'].upper(),
-            strike=float(row['strike']),
-            expiry=pd.to_datetime(row['expiry']).date(),
-            quantity=int(row['quantity']),
-            premium=float(row['premium']),
+        TradierTrade.objects.create(
+            trade_id=str(row.get('trade_id', '') or row.get('tradeid', '') or ''),
+            trade_date=parse_date(row.get('trade_date') or row.get('tradedate')) or date.today(),
+            symbol=str(row.get('symbol', '') or row.get('symbol', '')).strip(),
+            strategy=str(row.get('strategy', '') or row.get('strategy', '')).strip(),
+            strike=float(row.get('strike', 0) or row.get('strike', 0)) if pd.notna(row.get('strike', 0)) else None,
+            action=str(row.get('action', '') or row.get('action', '')).strip().upper(),
+            quantity=float(row.get('quantity', 0) or row.get('qty', 0)),
+            premium=float(row.get('premium', 0) or row.get('premium', 0)),
+            expiry=parse_date(row.get('expiry') or row.get('expiration') or row.get('expiry')),
         )
-        set_trade_pnl(trade)
+    
+    # Update trade log after import
+    update_trade_log()
 
-def set_trade_pnl(trade) -> None:
-    """Calculate and set P&L for a trade."""
-    current_price = get_market_price(trade.symbol)
-    trade.pnl = (current_price - trade.premium) * trade.quantity
-    trade.save()
-
+def import_webull(file_path: str) -> None:
+    """Import Webull CSV and save to database."""
+    df = pd.read_csv(file_path)
+    df.columns = [c.strip().lower() for c in df.columns]
+    
+    for _, row in df.iterrows():
+        WebullTrade.objects.create(
+            trade_id=str(row.get('trade_id', '') or row.get('tradeid', '') or ''),
+            trade_date=parse_date(row.get('trade_date') or row.get('tradedate')) or date.today(),
+            symbol=str(row.get('symbol', '') or row.get('symbol', '')).strip(),
+            strategy=str(row.get('strategy', '') or row.get('strategy', '')).strip(),
+            strike=float(row.get('strike', 0) or row.get('strike', 0)) if pd.notna(row.get('strike', 0)) else None,
+            action=str(row.get('action', '') or row.get('action', '')).strip().upper(),
+            quantity=float(row.get('quantity', 0) or row.get('qty', 0)),
+            premium=float(row.get('premium', 0) or row.get('premium', 0)),
+            expiry=parse_date(row.get('expiry') or row.get('expiration') or row.get('expiry')),
+        )
+    
+    # Update trade log after import
+    update_trade_log()

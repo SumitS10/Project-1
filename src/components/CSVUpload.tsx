@@ -1,16 +1,17 @@
 import React, { useState, useRef } from 'react';
-import { uploadFidelityCSV, uploadTradierCSV } from '../api';
+import { uploadFidelityCSV, uploadTradierCSV, uploadWebullCSV } from '../api';
 
 export const CSVUpload: React.FC<{ onUploadSuccess: () => void }> = ({ onUploadSuccess }) => {
-  const [uploading, setUploading] = useState<'fidelity' | 'tradier' | null>(null);
+  const [uploading, setUploading] = useState<'fidelity' | 'tradier' | 'webull' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fidelityInputRef = useRef<HTMLInputElement>(null);
   const tradierInputRef = useRef<HTMLInputElement>(null);
+  const webullInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (
     file: File | null,
-    type: 'fidelity' | 'tradier'
+    type: 'fidelity' | 'tradier' | 'webull'
   ) => {
     if (!file) return;
 
@@ -22,9 +23,12 @@ export const CSVUpload: React.FC<{ onUploadSuccess: () => void }> = ({ onUploadS
       if (type === 'fidelity') {
         await uploadFidelityCSV(file);
         setSuccess('Fidelity CSV uploaded successfully!');
-      } else {
+      } else if (type === 'tradier') {
         await uploadTradierCSV(file);
         setSuccess('Tradier CSV uploaded successfully!');
+      } else {
+        await uploadWebullCSV(file);
+        setSuccess('Webull CSV uploaded successfully!');
       }
       
       // Refresh positions after upload
@@ -75,6 +79,24 @@ export const CSVUpload: React.FC<{ onUploadSuccess: () => void }> = ({ onUploadS
             onClick={() => tradierInputRef.current?.click()}
           >
             {uploading === 'tradier' ? 'Uploading...' : '📁 Upload Tradier CSV'}
+          </button>
+        </label>
+
+        <label className="upload-button">
+          <input
+            ref={webullInputRef}
+            type="file"
+            accept=".csv"
+            onChange={(e) => handleFileSelect(e.target.files?.[0] || null, 'webull')}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            className="primary-button"
+            disabled={uploading !== null}
+            onClick={() => webullInputRef.current?.click()}
+          >
+            {uploading === 'webull' ? 'Uploading...' : '📁 Upload Webull CSV'}
           </button>
         </label>
       </div>

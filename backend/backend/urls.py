@@ -9,8 +9,11 @@ from django.views.static import serve
 from app.views import (
     UploadFidelityView,
     UploadTradierView,
+    UploadWebullView,
     FidelityTradeListView,
     TradierTradeListView,
+    WebullTradeListView,
+    TradeLogListView,
     ReactAppView,
 )
 
@@ -20,8 +23,11 @@ urlpatterns = [
     # API endpoints
     path('api/upload-fidelity/', UploadFidelityView.as_view()),
     path('api/upload-tradier/', UploadTradierView.as_view()),
+    path('api/upload-webull/', UploadWebullView.as_view()),
     path('api/fidelity-trades/', FidelityTradeListView.as_view()),
     path('api/tradier-trades/', TradierTradeListView.as_view()),
+    path('api/webull-trades/', WebullTradeListView.as_view()),
+    path('api/trade-log/', TradeLogListView.as_view()),
     
     # Serve static files from React build
     re_path(r'^assets/(?P<path>.*)$', serve, {'document_root': settings.FRONTEND_BUILD_DIR / 'assets'}),
