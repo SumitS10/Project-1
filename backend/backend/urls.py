@@ -14,6 +14,9 @@ from app.views import (
     TradierTradeListView,
     WebullTradeListView,
     TradeLogListView,
+    MarketPriceView,
+    CalculateRiskView,
+    PlaceTradeView,
     ReactAppView,
 )
 
@@ -28,6 +31,9 @@ urlpatterns = [
     path('api/tradier-trades/', TradierTradeListView.as_view()),
     path('api/webull-trades/', WebullTradeListView.as_view()),
     path('api/trade-log/', TradeLogListView.as_view()),
+    path('api/market-price/', MarketPriceView.as_view()),
+    path('api/options/calculate-risk/', CalculateRiskView.as_view()),
+    path('api/options/place-trade/', PlaceTradeView.as_view()),
     
     # Serve static files from React build
     re_path(r'^assets/(?P<path>.*)$', serve, {'document_root': settings.FRONTEND_BUILD_DIR / 'assets'}),
