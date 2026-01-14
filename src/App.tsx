@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from "react";
 import { OptionsTable } from "./components/OptionsTable";
 import { RiskSummary } from "./components/RiskSummary";
 import { Toolbar } from "./components/Toolbar";
+import { OptionsTrading } from "./components/OptionsTrading";
 import type { OptionPosition } from "./types";
 import { fetchAllPositions } from "./api";
 
@@ -129,6 +130,10 @@ export const App: React.FC = () => {
             <h2>Risk</h2>
           </div>
           <RiskSummary positions={positions} riskFreeRate={riskFreeRate} />
+        </section>
+
+        <section className="panel">
+          <OptionsTrading />
         </section>
       </main>
 

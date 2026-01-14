@@ -7,6 +7,7 @@ services:
       npm run build
       cd backend
       pip install -r requirements.txt
+      python manage.py makemigrations
       python manage.py migrate
       python manage.py collectstatic --noinput
     startCommand: cd backend && gunicorn backend.wsgi:application
@@ -17,3 +18,14 @@ services:
         generateValue: true
       - key: DEBUG
         value: "False"
+      # API Keys - Set these in Render dashboard Environment tab
+      # - key: TRADIER_API_KEY
+      #   value: "your_tradier_api_key"
+      # - key: TRADIER_API_SECRET
+      #   value: "your_tradier_api_secret"
+      # - key: TRADIER_ACCOUNT_ID
+      #   value: "your_tradier_account_id"
+      # - key: WEBULL_API_KEY
+      #   value: "your_webull_api_key"
+      # - key: WEBULL_API_SECRET
+      #   value: "your_webull_api_secret"

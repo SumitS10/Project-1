@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -134,3 +135,14 @@ FRONTEND_BUILD_DIR = BASE_DIR.parent / 'dist'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# API Configuration
+# Set these in environment variables or Render dashboard
+TRADIER_API_KEY = os.environ.get('TRADIER_API_KEY', '')
+TRADIER_API_SECRET = os.environ.get('TRADIER_API_SECRET', '')
+TRADIER_ACCOUNT_ID = os.environ.get('TRADIER_ACCOUNT_ID', '')
+TRADIER_BASE_URL = os.environ.get('TRADIER_BASE_URL', 'https://api.tradier.com/v1')
+
+WEBULL_API_KEY = os.environ.get('WEBULL_API_KEY', '')
+WEBULL_API_SECRET = os.environ.get('WEBULL_API_SECRET', '')
+WEBULL_BASE_URL = os.environ.get('WEBULL_BASE_URL', 'https://api.webull.com/api')

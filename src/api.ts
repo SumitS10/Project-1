@@ -149,13 +149,13 @@ export function convertTradeToPosition(
 ): OptionPosition {
   return {
     id: `trade-${trade.id}`,
-    symbol: trade.symbol,
+    symbol: trade.symbol || 'UNKNOWN',
     underlyingPrice: underlyingPrice || 100, // Default if not provided
-    type: trade.option_type as 'CALL' | 'PUT',
-    strike: trade.strike,
-    expiry: trade.expiry,
-    quantity: trade.quantity,
-    premium: trade.premium,
+    type: (trade.option_type || 'CALL') as 'CALL' | 'PUT',
+    strike: trade.strike || 0,
+    expiry: trade.expiry || new Date().toISOString().slice(0, 10), // Default to today if missing
+    quantity: trade.quantity || 0,
+    premium: trade.premium || 0,
     impliedVol: 0.2, // Default IV if not in backend
   };
 }
@@ -175,5 +175,75 @@ export async function fetchAllPositions(): Promise<OptionPosition[]> {
     console.error('Error fetching positions:', error);
     return [];
   }
+}
+
+// Options Trading Types
+export type OptionsStrategy = 'vertical' | 'iron_condor' | 'pmcc';
+
+export interface TradeRequest {
+  strategy: OptionsStrategy;
+  symbol: string;
+  expiry: string;
+  strikes: number[];
+  quantities: number[];
+  action: 'open' | 'close';
+}
+
+export interface RiskAnalysis {
+  max_profit: number;
+  max_loss: number;
+  breakeven: number[];
+  net_premium: number;
+  probability_of_profit: number;
+  risk_reward_ratio: number;
+  greeks?: {
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+  };
+}
+
+export interface TradeResult {
+  order_id: string;
+  status: string;
+  filled_price?: number;
+  message?: string;
+}
+
+// Calculate strategy risk
+export async function calculateStrategyRisk(request: TradeRequest): Promise<RiskAnalysis> {
+  const response = await fetch(`${API_BASE}/options/calculate-risk/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Failed to calculate risk' }));
+    throw new Error(error.error || 'Failed to calculate risk');
+  }
+
+  return response.json();
+}
+
+// Place options trade via Webull API
+export async function placeOptionsTrade(request: TradeRequest): Promise<TradeResult> {
+  const response = await fetch(`${API_BASE}/options/place-trade/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Failed to place trade' }));
+    throw new Error(error.error || 'Failed to place trade');
+  }
+
+  return response.json();
 }
 

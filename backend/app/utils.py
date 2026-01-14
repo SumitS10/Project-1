@@ -1,11 +1,38 @@
 import pandas as pd
 import numpy as np
+import re
 from datetime import date, datetime
 from typing import Dict, List, Any, Optional
+from django.conf import settings
 from .models import FidelityTrade, TradierTrade, WebullTrade, TradeLog
+from .api_clients import get_market_price_from_apis
+
+def get_market_price(symbol: str, source: str = None) -> float:
+    """
+    Get current market price for a symbol using APIs or fallback.
+    
+    Args:
+        symbol: Stock ticker symbol
+        source: 'tradier', 'webull', or None (tries both)
+    
+    Returns:
+        Current price as float, or fallback random price if APIs unavailable
+    """
+    # Try to get from APIs
+    if source:
+        price = get_market_price_from_apis(symbol, preferred_source=source)
+    else:
+        price = get_market_price_from_apis(symbol)
+    
+    if price:
+        return price
+    
+    # Fallback to random price if APIs not configured or fail
+    import random
+    return 100.0 + float(random.random() * 20.0)
 
 def parse_date(val) -> Optional[date]:
-    """Parse date from various formats."""
+    """Parse date from various formats, handling unrecognized timezones like 'EST'."""
     if val is None or val == "" or pd.isna(val):
         return None
     if isinstance(val, date):
@@ -13,8 +40,11 @@ def parse_date(val) -> Optional[date]:
     if isinstance(val, datetime):
         return val.date()
     try:
+        # Remove timezone abbreviations like 'EST', 'EDT', etc.
+        if isinstance(val, str):
+            val = re.sub(r'\s[A-Z]{2,4}$', '', val)
         return pd.to_datetime(val).date()
-    except:
+    except Exception:
         return None
 
 def get_trade_id(row: Dict, col_map: Dict[str, int]) -> str:
@@ -220,8 +250,50 @@ def update_trade_log():
             close_net=d["CloseNet"],
         )
 
+def parse_option_symbol(option_name: str) -> Dict[str, Any]:
+    """
+    Parse Webull option symbol format: SYMBOLYYMMDDC/PSTRIKE
+    Example: CRM260206C00270000 = CRM, 2026-02-06, CALL, 270.00
+    """
+    if not option_name or len(option_name) < 15:
+        return {}
+    
+    try:
+        # Find where date starts (after symbol, usually 3-5 chars)
+        # Look for pattern: letters followed by 6 digits
+        match = re.match(r'^([A-Z]+)(\d{6})([CP])(\d{8})$', option_name)
+        if match:
+            symbol = match.group(1)
+            date_str = match.group(2)  # YYMMDD
+            option_type = 'CALL' if match.group(3) == 'C' else 'PUT'
+            strike_str = match.group(4)  # 00270000 = 270.00
+            
+            # Parse date: YYMMDD -> YYYY-MM-DD
+            year = 2000 + int(date_str[:2])
+            month = int(date_str[2:4])
+            day = int(date_str[4:6])
+            expiry_date = date(year, month, day)
+            
+            # Parse strike: 00270000 -> 270.00
+            strike = float(strike_str) / 1000.0
+            
+            return {
+                'symbol': symbol,
+                'expiry': expiry_date,
+                'option_type': option_type,
+                'strike': strike
+            }
+    except:
+        pass
+    
+    return {}
+
+
 def import_fidelity(file_path: str) -> None:
     """Import Fidelity CSV and save to database."""
+    # Clear existing Fidelity trades (like VBA does)
+    FidelityTrade.objects.all().delete()
+    
     df = pd.read_csv(file_path)
     df.columns = [c.strip().lower() for c in df.columns]
     
@@ -245,6 +317,9 @@ def import_fidelity(file_path: str) -> None:
 
 def import_tradier(file_path: str) -> None:
     """Import Tradier CSV and save to database."""
+    # Clear existing Tradier trades (like VBA does)
+    TradierTrade.objects.all().delete()
+    
     df = pd.read_csv(file_path)
     df.columns = [c.strip().lower() for c in df.columns]
     
@@ -265,21 +340,75 @@ def import_tradier(file_path: str) -> None:
     update_trade_log()
 
 def import_webull(file_path: str) -> None:
-    """Import Webull CSV and save to database."""
+    """
+    Import Webull CSV and save to database.
+    Expected columns: Name, Symbol, Side, Status, Filled, Total Qty, Price, Avg Price, Time-in-Force, Placed Time, Filled Time
+    """
+    # Clear existing Webull trades (like VBA does)
+    WebullTrade.objects.all().delete()
+    
     df = pd.read_csv(file_path)
     df.columns = [c.strip().lower() for c in df.columns]
     
     for _, row in df.iterrows():
+        # Parse option details from "Name" column (e.g., "CRM260206C00270000" or "QQQ Vertical")
+        name = str(row.get('name', '') or row.get('name', '')).strip()
+        option_details = parse_option_symbol(name)
+        
+        # Get symbol from Symbol column or parsed from Name
+        symbol = str(row.get('symbol', '') or row.get('symbol', '')).strip()
+        if not symbol and option_details:
+            symbol = option_details.get('symbol', '')
+        
+        # Get side (BUY/SELL) and convert to action format
+        side = str(row.get('side', '') or row.get('side', '')).strip().upper()
+        if side == 'BUY':
+            action = 'BTO'  # Buy to Open
+        elif side == 'SELL':
+            action = 'STO'  # Sell to Open
+        else:
+            action = side
+        
+        # Get quantity
+        quantity = float(row.get('total qty', 0) or row.get('total_qty', 0) or row.get('qty', 0) or 0)
+        
+        # Get premium (use Avg Price or Price)
+        premium = float(row.get('avg price', 0) or row.get('avg_price', 0) or row.get('price', 0) or 0)
+        
+        # Get placed time for trade_date
+        placed_time = row.get('placed time', '') or row.get('placed_time', '') or row.get('trade_date', '')
+        trade_date_val = parse_date(placed_time) or date.today()
+        
+        # Use parsed option details or fallback to row data
+        strike = option_details.get('strike') if option_details else (
+            float(row.get('strike', 0)) if pd.notna(row.get('strike', 0)) else None
+        )
+        expiry = option_details.get('expiry') if option_details else (
+            parse_date(row.get('expiry') or row.get('expiration') or row.get('expiry'))
+        )
+        
+        # Strategy from Name if it's a strategy name (e.g., "QQQ Vertical")
+        strategy = ''
+        if 'vertical' in name.lower():
+            strategy = 'Vertical'
+        elif 'iron condor' in name.lower():
+            strategy = 'Iron Condor'
+        elif 'pmcc' in name.lower() or 'poor man' in name.lower():
+            strategy = 'PMCC'
+        elif option_details:
+            strategy = option_details.get('option_type', '')
+        
+        # Create trade record
         WebullTrade.objects.create(
-            trade_id=str(row.get('trade_id', '') or row.get('tradeid', '') or ''),
-            trade_date=parse_date(row.get('trade_date') or row.get('tradedate')) or date.today(),
-            symbol=str(row.get('symbol', '') or row.get('symbol', '')).strip(),
-            strategy=str(row.get('strategy', '') or row.get('strategy', '')).strip(),
-            strike=float(row.get('strike', 0) or row.get('strike', 0)) if pd.notna(row.get('strike', 0)) else None,
-            action=str(row.get('action', '') or row.get('action', '')).strip().upper(),
-            quantity=float(row.get('quantity', 0) or row.get('qty', 0)),
-            premium=float(row.get('premium', 0) or row.get('premium', 0)),
-            expiry=parse_date(row.get('expiry') or row.get('expiration') or row.get('expiry')),
+            trade_id=name,  # Use Name as trade_id
+            trade_date=trade_date_val,
+            symbol=symbol,
+            strategy=strategy,
+            strike=strike,
+            action=action,
+            quantity=quantity,
+            premium=premium,
+            expiry=expiry,
         )
     
     # Update trade log after import
