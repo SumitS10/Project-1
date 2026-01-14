@@ -7,7 +7,17 @@ export default defineConfig({
     outDir: "dist"
   },
   // Use relative paths for API calls (works with combined deployment)
-  base: "./"
+  base: "./",
+  server: {
+    proxy: {
+      // Proxy API requests to Django backend during development
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
+  }
 });
 
 
